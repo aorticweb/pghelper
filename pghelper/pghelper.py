@@ -1,20 +1,25 @@
 from collections import namedtuple
 from enum import Enum
+from uuid import uuid4
 
 import psycopg2
 from psycopg2.extensions import AsIs, cursor
+
 
 class Format(Enum):
     """
     Enum for output format of PG
     """
+
     Dict = 1
     NamedTuple = 2
+
 
 class PG(psycopg2.extensions.connection):
     """
     Extension of the psycopg2 connection class
     """
+
     def __init__(self, output_format=Format.NamedTuple, **kwargs):
         """
         Parameters
@@ -26,7 +31,7 @@ class PG(psycopg2.extensions.connection):
         dsn = psycopg2.extensions.make_dsn(**kwargs)
         super(PG, self).__init__(dsn)
 
-    def get_columns(self, cursor :cursor, table :str):
+    def get_columns(self, cursor: cursor, table: str):
         """
         Get column name for table
         Parameters
@@ -46,7 +51,7 @@ class PG(psycopg2.extensions.connection):
         )
         return [a[0] for a in cursor.fetchall()]
 
-    def _format_row(self, rows :list, columns :list):
+    def _format_row(self, rows: list, columns: list):
         """
         Format output rows according to the selected output format
         Parameters
@@ -67,7 +72,20 @@ class PG(psycopg2.extensions.connection):
             Table = namedtuple("Table", columns)
             return [Table(*r) for r in rows]
 
-    def select_query(self, columns :str, table :str, condition=""):
+    def _select_stmt(self, cursor, columns, table, condition=""):
+        existing_columns = self.get_columns(cursor, table)
+        if columns == "*":
+            columns = existing_columns
+        elif isinstance(columns, str):
+            columns = columns.replace(" ", "")
+            columns = columns.split(",")
+        else:
+            columns = list(filter(lambda x: x in existing_columns, columns))
+        query_col = ",".join(columns)
+        query = f"select {query_col} from {table} {condition};"
+        return query, columns
+
+    def select_query(self, columns: str, table: str, condition=""):
         """
         Database select query
         'Select [columns] from [table] [condition]'
@@ -86,16 +104,7 @@ class PG(psycopg2.extensions.connection):
             a list of dictionary or tuple representing the rows.
         """
         cursor = self.cursor()
-        existing_columns = self.get_columns(cursor, table)
-        if columns == "*":
-            columns = existing_columns
-        elif isinstance(columns, str):
-            columns = columns.replace(" ", "")
-            columns = columns.split(",")
-        else:
-            columns = list(filter(lambda x: x in existing_columns, columns))
-        query_col = ",".join(columns)
-        query = f"select {query_col} from {table} {condition};"
+        query, columns = self._select_stmt(cursor, columns, table, condition)
         cursor.execute(query)
         return self._format_row(cursor.fetchall(), columns)
 
@@ -147,7 +156,7 @@ class PG(psycopg2.extensions.connection):
 
     def safe_insert_bulk(self, table, data, return_insert=True, commit=False):
         """
-        Insert rows as list of dictionaries 
+        Insert rows as list of dictionaries
 
         Parameters
         ----------
@@ -237,5 +246,30 @@ class PG(psycopg2.extensions.connection):
         if commit:
             self.commit()
 
+    def stream_select_query(self, batch: int, columns: str, table: str, condition=""):
+        """
+        Database select query with server size pagination
+        'Select [columns] from [table] [condition]'
+        Parameters
+        ----------
+        batch_size: int
+            server side pagination batch size to save on memory
+        columns: list
+            columns selected in SQL statement
+        table: list
+            SQL table
+        condition: str
+            condition clause at the end of SQL statement (i.e WHERE, ORDER)
 
-
+        Returns
+        -------
+        list of dict or tuple
+            a list of dictionary or tuple representing the rows.
+        """
+        cursor = self.cursor()
+        cursor.itersize = batch_size
+        query, columns = self._select_stmt(cursor, columns, table, condition)
+        cursor = self.cursor(str(uuid4()))
+        cursor.execute(query)
+        for row in cursor:
+            yield self._format_row([row], columns)[0]

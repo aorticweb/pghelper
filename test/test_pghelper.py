@@ -104,3 +104,11 @@ def test_safe_update():
         if d["price"] % 2 == 0:
             assert d["client_name"] == "aorticweb"
     clear_table(conn)
+
+def test_stream_select_query():
+    conn = db(format=Format.Dict)
+    insert_data(conn, 500) 
+    data = conn.stream_select_query(100, "*", "orders")
+    for d in data:
+        assert data["id"]
+    clear_table(conn)
