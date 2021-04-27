@@ -11,7 +11,7 @@ def db(format=Format.NamedTuple):
     user = os.environ["PGUSER"]
     password = os.environ["PGPASSWORD"]
     return PG(
-        format,
+        output_format=format,
         dbname="postgres",
         user=user,
         password=password,

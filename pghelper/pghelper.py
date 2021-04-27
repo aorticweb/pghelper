@@ -12,15 +12,34 @@ class Format(Enum):
     NamedTuple = 2
 
 class PG(psycopg2.extensions.connection):
+    """
+    Extension of the psycopg2 connection class
+    """
     def __init__(self, output_format=Format.NamedTuple, **kwargs):
+        """
+        Parameters
+        ----------
+        output_format: Format
+            format of rows returned by query
+        """
         self.format = output_format
-        del kwargs["output_format"]
         dsn = psycopg2.extensions.make_dsn(**kwargs)
         super(PG, self).__init__(dsn)
 
     def get_columns(self, cursor :cursor, table :str):
         """
         Get column name for table
+        Parameters
+        ----------
+        cursor: psycopg2.extensions.cursor
+            psycopg2 cursor
+        table: str
+            SQL table
+
+        Returns
+        -------
+        list
+            a list of str representing the table columns.
         """
         cursor.execute(
             f"""select column_name from information_schema.columns where table_name='{table}'"""
@@ -30,6 +49,17 @@ class PG(psycopg2.extensions.connection):
     def _format_row(self, rows :list, columns :list):
         """
         Format output rows according to the selected output format
+        Parameters
+        ----------
+        rows: list
+            data returned by psycopg2 cursor execute function
+        columns: list
+            a list of string representing columns associated with rows
+
+        Returns
+        -------
+        list of dict or tuple
+            a list of dictionary or tuple representing the rows.
         """
         if self.format == Format.Dict:
             return [dict(zip(columns, r)) for r in rows]
@@ -37,8 +67,23 @@ class PG(psycopg2.extensions.connection):
             Table = namedtuple("Table", columns)
             return [Table(*r) for r in rows]
 
-    def select_query(self, columns, table, condition=""):
+    def select_query(self, columns :str, table :str, condition=""):
         """
+        Database select query
+        'Select [columns] from [table] [condition]'
+        Parameters
+        ----------
+        columns: list
+            columns selected in SQL statement
+        table: list
+            SQL table
+        condition: str
+            condition clause at the end of SQL statement (i.e WHERE, ORDER)
+
+        Returns
+        -------
+        list of dict or tuple
+            a list of dictionary or tuple representing the rows.
         """
         cursor = self.cursor()
         existing_columns = self.get_columns(cursor, table)
@@ -55,6 +100,24 @@ class PG(psycopg2.extensions.connection):
         return self._format_row(cursor.fetchall(), columns)
 
     def safe_insert(self, table, data, return_insert=False, commit=False):
+        """
+        Insert row as dictionary
+        Parameters
+        ----------
+        table: str
+            SQL table
+        data: dict
+            dictionary representing sql row to insert, dict keys should be the same as the sql table's columns
+        return_insert: bool
+            return the inserted row
+        commit: bool
+            commit insert to database
+
+        Returns
+        -------
+        list of dict or tuple
+            a list of dictionary or tuple representing the inserted rows.
+        """
         rv = None
         cursor = self.cursor()
         columns = self.get_columns(cursor, table)
@@ -84,7 +147,23 @@ class PG(psycopg2.extensions.connection):
 
     def safe_insert_bulk(self, table, data, return_insert=True, commit=False):
         """
-        TODO
+        Insert rows as list of dictionaries 
+
+        Parameters
+        ----------
+        table: str
+            SQL table
+        data: list[dict]
+            dictionary representing sql row to insert, dict keys should be the same as the sql table's columns
+        return_insert: bool
+            return the inserted rows
+        commit: bool
+            commit inserts to database
+
+        Returns
+        -------
+        list of dict or tuple
+            a list of dictionary or tuple representing the inserted rows.
         """
         if not data:
             raise Exception("No Data to insert")
@@ -121,6 +200,22 @@ class PG(psycopg2.extensions.connection):
         return rv
 
     def safe_update(self, table, data, condition="", table_update=False, commit=False):
+        """
+        Update statement
+
+        Parameters
+        ----------
+        table: str
+            SQL table
+        data: dict
+            dictionary representing the sql table's columns that should be updated
+        condition: str
+            WHERE Clause
+        table_update: bool
+            allow update without WHERE clause (entire table)
+        commit: bool
+            commit update to database
+        """
         if not condition and not table_update:
             raise Exception("Use a where close in the statement")
         cursor = self.cursor()
@@ -138,7 +233,6 @@ class PG(psycopg2.extensions.connection):
         )
         update_stmt = f"UPDATE {table} SET {col_update} {condition};"
         cursor.execute(update_stmt)
-        # print(cursor.query)
         cursor.close()
         if commit:
             self.commit()
